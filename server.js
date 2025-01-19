@@ -1,15 +1,13 @@
-// Load environment variables
+import express from 'express';
+import { createConnection } from 'mysql2';
+import { json } from 'body-parser';
 require('dotenv').config();
 
-const express = require('express');
-const mysql = require('mysql2');
-const bodyParser = require('body-parser');
-
 const app = express();
-app.use(bodyParser.json());
+app.use(json());
 
 // Database connection using environment variables
-const db = mysql.createConnection({
+const db = createConnection({
     host: process.env.HOST || 'localhost',
     user: process.env.USER || 'your_username',
     password: process.env.PASSWORD || 'your_password',
