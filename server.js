@@ -1,13 +1,19 @@
 import express from 'express';
-import { createConnection } from 'mysql2';
-import { json } from 'body-parser';
-require('dotenv').config();
+import mysql from 'mysql2';
+import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+
+// Configure dotenv
+dotenv.config();
 
 const app = express();
-app.use(json());
+app.use(bodyParser.json());
 
 // Database connection using environment variables
-const db = createConnection({
+const db = mysql.createConnection({
     host: process.env.HOST || 'localhost',
     user: process.env.USER || 'your_username',
     password: process.env.PASSWORD || 'your_password',
@@ -75,26 +81,26 @@ app.post('/api/users', (req, res) => {
 
     // Validate required fields
     if (!name || !phone_number || !email) {
-        return res.status(400).json({ error: 'All fields are required' });
+        return res.status(400).bodyParser.json({ error: 'All fields are required' });
     }
 
     // Validate phone number and email format
     if (!isValidPhoneNumber(phone_number)) {
-        return res.status(400).json({ error: 'Invalid phone number format' });
+        return res.status(400).bodyParser.json({ error: 'Invalid phone number format' });
     }
     if (!isValidEmail(email)) {
-        return res.status(400).json({ error: 'Invalid email format' });
+        return res.status(400).bodyParser.json({ error: 'Invalid email format' });
     }
 
     const query = 'INSERT INTO users (name, phone_number, email) VALUES (?, ?, ?)';
     db.query(query, [name, phone_number, email], (err, result) => {
         if (err) {
             if (err.code === 'ER_DUP_ENTRY') {
-                return res.status(409).json({ error: 'Phone number already exists' });
+                return res.status(409).bodyParser.json({ error: 'Phone number already exists' });
             }
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
-        res.status(201).json({
+        res.status(201).bodyParser.json({
             message: 'User created successfully',
             userId: result.insertId
         });
@@ -106,9 +112,9 @@ app.get('/api/users', (req, res) => {
     const query = 'SELECT * FROM users';
     db.query(query, (err, results) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
-        res.json(results);
+        res.bodyParser.json(results);
     });
 });
 
@@ -119,12 +125,12 @@ app.get('/api/users/:phone', (req, res) => {
     
     db.query(query, [phone_number], (err, results) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
         if (results.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(404).bodyParser.json({ error: 'User not found' });
         }
-        res.json(results[0]);
+        res.bodyParser.json(results[0]);
     });
 });
 
@@ -135,23 +141,23 @@ app.put('/api/users/:phone', (req, res) => {
 
     // Validate required fields
     if (!name || !email) {
-        return res.status(400).json({ error: 'Name and email are required' });
+        return res.status(400).bodyParser.json({ error: 'Name and email are required' });
     }
 
     // Validate email format
     if (!isValidEmail(email)) {
-        return res.status(400).json({ error: 'Invalid email format' });
+        return res.status(400).bodyParser.json({ error: 'Invalid email format' });
     }
 
     const query = 'UPDATE users SET name = ?, email = ? WHERE phone_number = ?';
     db.query(query, [name, email, phone_number], (err, result) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
         if (result.affectedRows === 0) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(404).bodyParser.json({ error: 'User not found' });
         }
-        res.json({ message: 'User updated successfully' });
+        res.bodyParser.json({ message: 'User updated successfully' });
     });
 });
 
@@ -162,21 +168,21 @@ app.delete('/api/users/:phone', (req, res) => {
     // First check if user has any vouchers
     db.query('SELECT * FROM vouchers WHERE user_number = ?', [phone_number], (err, vouchers) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
         if (vouchers.length > 0) {
-            return res.status(400).json({ error: 'Cannot delete user with active vouchers' });
+            return res.status(400).bodyParser.json({ error: 'Cannot delete user with active vouchers' });
         }
 
         const query = 'DELETE FROM users WHERE phone_number = ?';
         db.query(query, [phone_number], (err, result) => {
             if (err) {
-                return res.status(500).json({ error: 'Database error' });
+                return res.status(500).bodyParser.json({ error: 'Database error' });
             }
             if (result.affectedRows === 0) {
-                return res.status(404).json({ error: 'User not found' });
+                return res.status(404).bodyParser.json({ error: 'User not found' });
             }
-            res.json({ message: 'User deleted successfully' });
+            res.bodyParser.json({ message: 'User deleted successfully' });
         });
     });
 });
@@ -196,25 +202,25 @@ app.post('/api/vouchers', (req, res) => {
     const { user_number } = req.body;
 
     if (!user_number) {
-        return res.status(400).json({ error: 'User number is required' });
+        return res.status(400).bodyParser.json({ error: 'User number is required' });
     }
 
     // Check if user exists and doesn't already have a voucher
     db.query('SELECT * FROM users WHERE phone_number = ?', [user_number], (err, users) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
         if (users.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(404).bodyParser.json({ error: 'User not found' });
         }
 
         // Check if user already has a voucher
         db.query('SELECT * FROM vouchers WHERE user_number = ?', [user_number], (err, vouchers) => {
             if (err) {
-                return res.status(500).json({ error: 'Database error' });
+                return res.status(500).bodyParser.json({ error: 'Database error' });
             }
             if (vouchers.length > 0) {
-                return res.status(400).json({ 
+                return res.status(400).bodyParser.json({ 
                     error: 'User already has a voucher',
                     existing_voucher: vouchers[0]
                 });
@@ -226,9 +232,9 @@ app.post('/api/vouchers', (req, res) => {
             const query = 'INSERT INTO vouchers (id, timestamp, user_number) VALUES (?, ?, ?)';
             db.query(query, [voucherId, timestamp, user_number], (err) => {
                 if (err) {
-                    return res.status(500).json({ error: 'Failed to create voucher' });
+                    return res.status(500).bodyParser.json({ error: 'Failed to create voucher' });
                 }
-                res.status(201).json({
+                res.status(201).bodyParser.json({
                     message: 'Voucher created successfully',
                     voucher: {
                         id: voucherId,
@@ -247,9 +253,9 @@ app.get('/api/vouchers', (req, res) => {
     const query = 'SELECT * FROM vouchers';
     db.query(query, (err, results) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
-        res.json(results);
+        res.bodyParser.json(results);
     });
 });
 
@@ -260,12 +266,12 @@ app.get('/api/vouchers/:id', (req, res) => {
     
     db.query(query, [voucherId], (err, results) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
         if (results.length === 0) {
-            return res.status(404).json({ error: 'Voucher not found' });
+            return res.status(404).bodyParser.json({ error: 'Voucher not found' });
         }
-        res.json(results[0]);
+        res.bodyParser.json(results[0]);
     });
 });
 
@@ -276,22 +282,22 @@ app.put('/api/vouchers/:id/redeem', (req, res) => {
     // First check if voucher exists and is not already redeemed
     db.query('SELECT * FROM vouchers WHERE id = ?', [voucherId], (err, results) => {
         if (err) {
-            return res.status(500).json({ error: 'Database error' });
+            return res.status(500).bodyParser.json({ error: 'Database error' });
         }
         if (results.length === 0) {
-            return res.status(404).json({ error: 'Voucher not found' });
+            return res.status(404).bodyParser.json({ error: 'Voucher not found' });
         }
         if (results[0].status === 'redeemed') {
-            return res.status(400).json({ error: 'Voucher already redeemed' });
+            return res.status(400).bodyParser.json({ error: 'Voucher already redeemed' });
         }
 
         // Update voucher status to redeemed
         const query = 'UPDATE vouchers SET status = "redeemed" WHERE id = ?';
         db.query(query, [voucherId], (err, result) => {
             if (err) {
-                return res.status(500).json({ error: 'Failed to redeem voucher' });
+                return res.status(500).bodyParser.json({ error: 'Failed to redeem voucher' });
             }
-            res.json({ message: 'Voucher redeemed successfully' });
+            res.bodyParser.json({ message: 'Voucher redeemed successfully' });
         });
     });
 });
