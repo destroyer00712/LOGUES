@@ -15,7 +15,7 @@ app.use(bodyParser.json());
 // Database connection using environment variables
 const db = mysql.createConnection({
     host: process.env.HOST || 'localhost',
-    user: process.env.USER || 'your_username',
+    user: process.env.USERNAME || 'your_username',
     password: process.env.PASSWORD || 'your_password',
     database: process.env.DB_NAME || 'user_management'
 });
