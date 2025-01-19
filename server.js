@@ -2,6 +2,7 @@
 const express = require('express');
 const mysql = require('mysql2');
 const bodyParser = require('body-parser');
+require('dotenv').config()
 
 const app = express();
 app.use(bodyParser.json());
@@ -9,9 +10,9 @@ app.use(bodyParser.json());
 // Database connection
 const db = mysql.createConnection({
     host: 'localhost',
-    user: 'your_username',
-    password: 'your_password',
-    database: 'user_management'
+    user: process.env.USERNAME,
+    password: process.env.PASSWORD,
+    database: process.env.DB_NAME
 });
 
 // Connect to database
