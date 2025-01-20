@@ -91,14 +91,32 @@ app.post('/api/vouchers', (req, res) => {
         return res.status(400).json({ error: 'User number is required' });
     }
 
+    console.log('Creating voucher for user:', user_number);
+
     // Check if user exists
     db.query('SELECT * FROM users WHERE phone_number = ?', [user_number], (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
-        if (results.length === 0) return res.status(404).json({ error: 'User not found' });
+        if (err) {
+            console.error('Error checking user existence:', err);
+            return res.status(500).json({ 
+                error: 'Database error',
+                details: err.message
+            });
+        }
+        
+        if (results.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
 
         // Check if user already has a voucher
         db.query('SELECT * FROM vouchers WHERE user_number = ?', [user_number], (err, voucherResults) => {
-            if (err) return res.status(500).json({ error: 'Database error' });
+            if (err) {
+                console.error('Error checking existing voucher:', err);
+                return res.status(500).json({ 
+                    error: 'Database error',
+                    details: err.message
+                });
+            }
+
             if (voucherResults.length > 0) {
                 return res.status(409).json({ error: 'User already has a voucher' });
             }
@@ -106,30 +124,90 @@ app.post('/api/vouchers', (req, res) => {
             const timestamp = Date.now();
             const voucher_id = `LG${timestamp}`;
 
+            console.log('Generating new voucher:', {
+                voucher_id,
+                user_number,
+                timestamp
+            });
+
             const query = 'INSERT INTO vouchers (voucher_id, user_number, timestamp, status) VALUES (?, ?, ?, ?)';
             db.query(query, [voucher_id, user_number, timestamp, 'not_redeemed'], (err, result) => {
-                if (err) return res.status(500).json({ error: 'Database error' });
+                if (err) {
+                    console.error('Error inserting voucher:', err);
+                    return res.status(500).json({ 
+                        error: 'Database error',
+                        details: err.message
+                    });
+                }
+                
                 res.status(201).json({ 
                     message: 'Voucher created successfully',
                     voucher_id,
-                    timestamp
+                    timestamp,
+                    status: 'not_redeemed'
                 });
             });
         });
     });
 });
 
+// Also let's verify if the vouchers table exists
+db.query(`
+    SHOW TABLES LIKE 'vouchers'
+`, (err, results) => {
+    if (err) {
+        console.error('Error checking vouchers table:', err);
+    } else {
+        if (results.length === 0) {
+            // Create vouchers table if it doesn't exist
+            const createVoucherTable = `
+                CREATE TABLE IF NOT EXISTS vouchers (
+                    voucher_id VARCHAR(50) PRIMARY KEY,
+                    user_number VARCHAR(15),
+                    timestamp BIGINT NOT NULL,
+                    status ENUM('redeemed', 'not_redeemed') DEFAULT 'not_redeemed',
+                    FOREIGN KEY (user_number) REFERENCES users(phone_number)
+                )
+            `;
+            
+            db.query(createVoucherTable, (err) => {
+                if (err) {
+                    console.error('Error creating vouchers table:', err);
+                } else {
+                    console.log('Vouchers table created successfully');
+                }
+            });
+        } else {
+            console.log('Vouchers table exists');
+        }
+    }
+});
+
+// Get vouchers endpoint with error logging
 app.get('/api/vouchers', (req, res) => {
     db.query('SELECT * FROM vouchers', (err, results) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) {
+            console.error('Error fetching vouchers:', err);
+            return res.status(500).json({ 
+                error: 'Database error',
+                details: err.message
+            });
+        }
         res.json(results);
     });
 });
 
+// Redeem voucher endpoint with error logging
 app.patch('/api/vouchers/:voucher_id/redeem', (req, res) => {
     const query = 'UPDATE vouchers SET status = "redeemed" WHERE voucher_id = ? AND status = "not_redeemed"';
     db.query(query, [req.params.voucher_id], (err, result) => {
-        if (err) return res.status(500).json({ error: 'Database error' });
+        if (err) {
+            console.error('Error redeeming voucher:', err);
+            return res.status(500).json({ 
+                error: 'Database error',
+                details: err.message
+            });
+        }
         if (result.affectedRows === 0) {
             return res.status(400).json({ error: 'Voucher not found or already redeemed' });
         }
