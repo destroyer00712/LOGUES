@@ -38,6 +38,57 @@ db.connect((err) => {
                 FOREIGN KEY (user_number) REFERENCES users(phone_number) ON DELETE CASCADE
             ) ENGINE=InnoDB;`;
 
+        const createDealerTable = `
+        CREATE TABLE IF NOT EXISTS dealers (
+            dealer_number VARCHAR(15) PRIMARY KEY,
+            password VARCHAR(100) NOT NULL,
+            dealer_name VARCHAR(100) NOT NULL,
+            dealer_pincode VARCHAR(10) NOT NULL,
+            redeemed_vouchers JSON DEFAULT ('[]')
+        )
+    `;
+
+    const createDistributorTable = `
+        CREATE TABLE IF NOT EXISTS distributors (
+            distributor_number VARCHAR(15) PRIMARY KEY,
+            password VARCHAR(100) NOT NULL,
+            distributor_name VARCHAR(100) NOT NULL,
+            distributor_pincode VARCHAR(10) NOT NULL,
+            dealers JSON DEFAULT ('[]')
+        )
+    `;
+
+    db.query(createDistributorTable, (err) => {
+        if (err) {
+            console.error('Error creating distributors table:', err);
+        } else {
+            console.log('Distributors table created successfully');
+        }
+    });
+
+    // Modify dealers table to include distributor reference
+    const alterDealersTable = `
+        ALTER TABLE dealers 
+        ADD COLUMN distributor_number VARCHAR(15),
+        ADD FOREIGN KEY (distributor_number) REFERENCES distributors(distributor_number)
+    `;
+
+    db.query(alterDealersTable, (err) => {
+        if (err) {
+            console.error('Error altering dealers table:', err);
+        } else {
+            console.log('Dealers table altered successfully');
+        }
+    });
+        
+    db.query(createDealerTable, (err) => {
+        if (err) {
+            console.error('Error creating dealers table:', err);
+        } else {
+            console.log('Dealers table created successfully');
+        }
+    });
+
     db.query(createUserTable, (err) => {
         if (err) console.error('Error creating users table:', err);
     });
@@ -198,22 +249,276 @@ app.get('/api/vouchers', (req, res) => {
 });
 
 // Redeem voucher endpoint with error logging
+// Modify the existing voucher redemption endpoint to include dealer information
 app.patch('/api/vouchers/:voucher_id/redeem', (req, res) => {
-    const query = 'UPDATE vouchers SET status = "redeemed" WHERE voucher_id = ? AND status = "not_redeemed"';
-    db.query(query, [req.params.voucher_id], (err, result) => {
+    const { dealer_number } = req.body;
+    
+    if (!dealer_number) {
+        return res.status(400).json({ error: 'Dealer number is required' });
+    }
+
+    // Start a transaction
+    db.beginTransaction((err) => {
         if (err) {
-            console.error('Error redeeming voucher:', err);
-            return res.status(500).json({ 
-                error: 'Database error',
-                details: err.message
+            console.error('Error starting transaction:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+
+        // First check and update voucher status
+        const updateVoucherQuery = 'UPDATE vouchers SET status = "redeemed" WHERE voucher_id = ? AND status = "not_redeemed"';
+        db.query(updateVoucherQuery, [req.params.voucher_id], (err, voucherResult) => {
+            if (err) {
+                return db.rollback(() => {
+                    console.error('Error updating voucher:', err);
+                    res.status(500).json({ error: 'Database error', details: err.message });
+                });
+            }
+
+            if (voucherResult.affectedRows === 0) {
+                return db.rollback(() => {
+                    res.status(400).json({ error: 'Voucher not found or already redeemed' });
+                });
+            }
+
+            // Get existing redeemed vouchers for dealer
+            const getDealerQuery = 'SELECT redeemed_vouchers FROM dealers WHERE dealer_number = ?';
+            db.query(getDealerQuery, [dealer_number], (err, dealerResults) => {
+                if (err) {
+                    return db.rollback(() => {
+                        console.error('Error fetching dealer:', err);
+                        res.status(500).json({ error: 'Database error', details: err.message });
+                    });
+                }
+
+                if (dealerResults.length === 0) {
+                    return db.rollback(() => {
+                        res.status(404).json({ error: 'Dealer not found' });
+                    });
+                }
+
+                // Update dealer's redeemed vouchers
+                const redeemedVouchers = JSON.parse(dealerResults[0].redeemed_vouchers);
+                redeemedVouchers.push({
+                    voucher_id: req.params.voucher_id,
+                    redeemed_at: new Date().toISOString()
+                });
+
+                const updateDealerQuery = 'UPDATE dealers SET redeemed_vouchers = ? WHERE dealer_number = ?';
+                db.query(updateDealerQuery, [JSON.stringify(redeemedVouchers), dealer_number], (err) => {
+                    if (err) {
+                        return db.rollback(() => {
+                            console.error('Error updating dealer vouchers:', err);
+                            res.status(500).json({ error: 'Database error', details: err.message });
+                        });
+                    }
+
+                    // Commit the transaction
+                    db.commit((err) => {
+                        if (err) {
+                            return db.rollback(() => {
+                                console.error('Error committing transaction:', err);
+                                res.status(500).json({ error: 'Database error', details: err.message });
+                            });
+                        }
+                        res.json({ 
+                            message: 'Voucher redeemed successfully',
+                            voucher_id: req.params.voucher_id,
+                            dealer_number: dealer_number
+                        });
+                    });
+                });
             });
-        }
-        if (result.affectedRows === 0) {
-            return res.status(400).json({ error: 'Voucher not found or already redeemed' });
-        }
-        res.json({ message: 'Voucher redeemed successfully' });
+        });
     });
 });
+
+//Dealer endpoints
+app.post('/api/dealers', (req, res) => {
+    const { dealer_number, password, dealer_name, dealer_pincode, distributor_number } = req.body;
+    
+    if (!dealer_number || !password || !dealer_name || !dealer_pincode || !distributor_number) {
+        return res.status(400).json({ error: 'All fields are required, including distributor_number' });
+    }
+
+    // Start a transaction
+    db.beginTransaction((err) => {
+        if (err) {
+            console.error('Error starting transaction:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+
+        // First check if distributor exists
+        db.query('SELECT * FROM distributors WHERE distributor_number = ?', [distributor_number], (err, distributorResults) => {
+            if (err) {
+                return db.rollback(() => {
+                    console.error('Error checking distributor:', err);
+                    res.status(500).json({ error: 'Database error', details: err.message });
+                });
+            }
+
+            if (distributorResults.length === 0) {
+                return db.rollback(() => {
+                    res.status(404).json({ error: 'Distributor not found' });
+                });
+            }
+
+            // Create dealer
+            const createDealerQuery = 'INSERT INTO dealers (dealer_number, password, dealer_name, dealer_pincode, redeemed_vouchers, distributor_number) VALUES (?, ?, ?, ?, ?, ?)';
+            db.query(createDealerQuery, [dealer_number, password, dealer_name, dealer_pincode, '[]', distributor_number], (err, dealerResult) => {
+                if (err) {
+                    return db.rollback(() => {
+                        console.error('Error creating dealer:', err);
+                        if (err.code === 'ER_DUP_ENTRY') {
+                            res.status(409).json({ error: 'Dealer number already exists' });
+                        } else {
+                            res.status(500).json({ error: 'Database error', details: err.message });
+                        }
+                    });
+                }
+
+                // Update distributor's dealers JSON
+                const dealers = JSON.parse(distributorResults[0].dealers || '[]');
+                dealers.push({
+                    dealer_number,
+                    dealer_name,
+                    dealer_pincode,
+                    created_at: new Date().toISOString()
+                });
+
+                const updateDistributorQuery = 'UPDATE distributors SET dealers = ? WHERE distributor_number = ?';
+                db.query(updateDistributorQuery, [JSON.stringify(dealers), distributor_number], (err) => {
+                    if (err) {
+                        return db.rollback(() => {
+                            console.error('Error updating distributor dealers:', err);
+                            res.status(500).json({ error: 'Database error', details: err.message });
+                        });
+                    }
+
+                    // Commit the transaction
+                    db.commit((err) => {
+                        if (err) {
+                            return db.rollback(() => {
+                                console.error('Error committing transaction:', err);
+                                res.status(500).json({ error: 'Database error', details: err.message });
+                            });
+                        }
+                        res.status(201).json({ 
+                            message: 'Dealer created successfully and added to distributor',
+                            dealer_number,
+                            distributor_number
+                        });
+                    });
+                });
+            });
+        });
+    });
+});
+
+
+// Dealer login
+app.post('/api/dealers/login', (req, res) => {
+    const { dealer_number, password } = req.body;
+    
+    if (!dealer_number || !password) {
+        return res.status(400).json({ error: 'Dealer number and password are required' });
+    }
+
+    const query = 'SELECT dealer_number, dealer_name, dealer_pincode FROM dealers WHERE dealer_number = ? AND password = ?';
+    db.query(query, [dealer_number, password], (err, results) => {
+        if (err) {
+            console.error('Error during login:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        if (results.length === 0) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        
+        res.json({
+            message: 'Login successful',
+            dealer: results[0]
+        });
+    });
+});
+
+// Get dealer details
+app.get('/api/dealers/:dealer_number', (req, res) => {
+    const query = 'SELECT dealer_number, dealer_name, dealer_pincode, redeemed_vouchers FROM dealers WHERE dealer_number = ?';
+    db.query(query, [req.params.dealer_number], (err, results) => {
+        if (err) {
+            console.error('Error fetching dealer:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ error: 'Dealer not found' });
+        }
+        res.json(results[0]);
+    });
+});
+
+// Create distributor
+app.post('/api/distributors', (req, res) => {
+    const { distributor_number, password, distributor_name, distributor_pincode } = req.body;
+    
+    if (!distributor_number || !password || !distributor_name || !distributor_pincode) {
+        return res.status(400).json({ error: 'All fields are required' });
+    }
+
+    const query = 'INSERT INTO distributors (distributor_number, password, distributor_name, distributor_pincode, dealers) VALUES (?, ?, ?, ?, ?)';
+    db.query(query, [distributor_number, password, distributor_name, distributor_pincode, '[]'], (err, result) => {
+        if (err) {
+            console.error('Error creating distributor:', err);
+            if (err.code === 'ER_DUP_ENTRY') {
+                return res.status(409).json({ error: 'Distributor number already exists' });
+            }
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        res.status(201).json({ message: 'Distributor created successfully' });
+    });
+});
+
+// Distributor login
+app.post('/api/distributors/login', (req, res) => {
+    const { distributor_number, password } = req.body;
+    
+    if (!distributor_number || !password) {
+        return res.status(400).json({ error: 'Distributor number and password are required' });
+    }
+
+    const query = 'SELECT distributor_number, distributor_name, distributor_pincode FROM distributors WHERE distributor_number = ? AND password = ?';
+    db.query(query, [distributor_number, password], (err, results) => {
+        if (err) {
+            console.error('Error during login:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        if (results.length === 0) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+        
+        res.json({
+            message: 'Login successful',
+            distributor: results[0]
+        });
+    });
+});
+
+// Get distributor details with all dealers
+app.get('/api/distributors/:distributor_number', (req, res) => {
+    const query = 'SELECT distributor_number, distributor_name, distributor_pincode, dealers FROM distributors WHERE distributor_number = ?';
+    db.query(query, [req.params.distributor_number], (err, results) => {
+        if (err) {
+            console.error('Error fetching distributor:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ error: 'Distributor not found' });
+        }
+        res.json(results[0]);
+    });
+});
+
+
 
 const PORT = process.env.PORT || 1346;
 app.listen(PORT, () => {
