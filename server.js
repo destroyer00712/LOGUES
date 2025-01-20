@@ -30,13 +30,13 @@ db.connect((err) => {
         )`;
 
     const createVoucherTable = `
-        CREATE TABLE IF NOT EXISTS vouchers (
-            voucher_id VARCHAR(50) PRIMARY KEY,
-            user_number VARCHAR(15) UNIQUE,
-            timestamp BIGINT NOT NULL,
-            status ENUM('redeemed', 'not_redeemed') DEFAULT 'not_redeemed',
-            FOREIGN KEY (user_number) REFERENCES users(phone_number)
-        )`;
+            CREATE TABLE vouchers (
+                voucher_id VARCHAR(50) PRIMARY KEY,
+                user_number VARCHAR(15),
+                timestamp BIGINT NOT NULL,
+                status ENUM('redeemed', 'not_redeemed') DEFAULT 'not_redeemed',
+                FOREIGN KEY (user_number) REFERENCES users(phone_number) ON DELETE CASCADE
+            ) ENGINE=InnoDB;`;
 
     db.query(createUserTable, (err) => {
         if (err) console.error('Error creating users table:', err);
