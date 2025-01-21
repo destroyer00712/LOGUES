@@ -518,6 +518,20 @@ app.get('/api/distributors/:distributor_number', (req, res) => {
     });
 });
 
+// Get all distributors
+app.get('/api/distributors', (req, res) => {
+    const query = 'SELECT distributor_number, distributor_name, distributor_pincode, dealers FROM distributors';
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error fetching distributors:', err);
+            return res.status(500).json({ error: 'Database error', details: err.message });
+        }
+        
+        res.json(results);
+    });
+});
+
 
 
 const PORT = process.env.PORT || 1346;
